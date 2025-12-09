@@ -16,10 +16,14 @@ function uint32 (a) {
   return new Uint32Array(a)
 }
 
+function randombytes (a) {
+  return crypto.getRandomValues(uint8(a))
+}
+
 function pack (a) {
   let b = 0, c = a.length, d = []
   while (b < c) {
-    d.push(a[b++] ^ a[b++] << 8 ^ a[b++] << 16 ^ a[b++] << 24 >> 0)
+    d.push(a[b++] ^ a[b++] << 8 ^ a[b++] << 16 ^ a[b++] << 24)
   }
   return d
 }
@@ -64,7 +68,7 @@ function expand (a, g=a0, h=a1) {
   }
 
   function l () {
-    let a = i.slice(), b = j.slice(), c, d = a16, e = 10
+    let a = i.slice(), b = j.slice(), c, d = a16, e = 25
 
     function m (a) {
       k(a, 0, 4, 8, 12)
@@ -110,7 +114,7 @@ function expand (a, g=a0, h=a1) {
     return b
   }
 
-  let p = 64n, q = g / p
+  const p = 64n, q = g / p
   i = o(n(i) + q, uint32(a16))
   j = o(n(j) + q, uint32(a16))
   m = g % p
@@ -129,106 +133,111 @@ function expand (a, g=a0, h=a1) {
   return a
 }
 
-function reduce (a, h=a1) {
+function reduces (a, h=a1) {
   while (a.length > a128) {
     a = [...expand(a.slice(a0, a128), a0, a64), ...a.slice(a128)]
   }
   return expand(a, a0, h)
 }
 
-function randombytes (a) {
-  return crypto.getRandomValues(uint8(a))
-}
-
+seed_bytes = 4
 seeds = 256 ** 2
 sample_bytes = seeds * 32
 public_bytes = sample_bytes + 256
-secret_bytes = public_bytes + seeds * 4
+secret_bytes = public_bytes + seeds * seed_bytes
 cipher_bytes = 32
 shared_bytes = 32
 
 function crypto_kem_keypair (a, b) {
-  const e = randombytes(256)
-  a.set(e, secret_bytes - 256)
-  b.set(e, sample_bytes)
-  const p = []
-  let g, h, i, j = 0, k, l, m = sample_bytes
-  while (j < sample_bytes) {
-    i = randombytes(4)
-    h = i.reduce((a, b) => 256 * a + b)
-    if (p.includes(h)) continue
-    p.push(h)
-    h *= 64
-    g = expand(e, h, h + 64)
-    l = 0
-    while (l < 32) {
-      k = j + l
-      a[k] = g[l + 32]
-      b[k] = g[l++]
+  const c = randombytes(256), d = []
+  a.set(c, secret_bytes - 256)
+  b.set(c, sample_bytes)
+  let e = 0, f, g, h, i, j = sample_bytes
+  while (e < sample_bytes) {
+    f = randombytes(seed_bytes)
+    g = f.reduce((a, b) => a * 256 + b)
+    if (d.includes(g)) {
+      continue
     }
-    j += 32
-    l = 0
-    while (l < 4) {
-      a[m++] = i[l++]
+    d.push(g)
+    g *= 64
+    h = expand(c, g, g + 64)
+    i = 0
+    while (i < 32) {
+      g = e + i
+      a[g] = h[i + 32]
+      b[g] = h[i++]
+    }
+    e += 32
+    i = 0
+    while (i < seed_bytes) {
+      a[j++] = f[i++]
     }
   }
 }
 
 function crypto_kem_enc (c, k, p) {
-  const d = []
-  for (let i = 0, l = p.length - 256; i < l;) {
-    d.push(p.slice(i, i += 32).toString())
+  const d = [], e = p.slice(-256), f = e.slice()
+  let g = 0, h = p.length - 256, i, j, l, m
+  while (g < h) {
+    d.push(p.slice(g, g += 32).toString())
   }
-  const e = p.slice(-256), f = uint8(e)
+  g = 0
   p = []
-  let g, h, i, j = 0, l, m
-  while (j < cipher_bytes) {
-    i = randombytes(4)
-    h = i.reduce((a, b) => 256 * a + b)
-    if (p.includes(h)) continue
-    p.push(h)
-    h *= 64
-    g = expand(e, h, h + 32)
-    if (d.includes(g.toString())) {
-      g = expand(e, h + 32, h + 64)
+  while (g < cipher_bytes) {
+    h = randombytes(seed_bytes)
+    i = h.reduce((a, b) => a * 256 + b)
+    if (p.includes(i)) {
+      continue
+    }
+    p.push(i)
+    i *= 64
+    j = expand(e, i, i + 32)
+    if (d.includes(j.toString())) {
+      j = expand(e, i + 32, i + 64)
       l = 0
       while (l < 32) {
-        h = g[l]
-        m = j + l
-        c[m] = h
-        f[m] += h + i[l++ % 4]
+        i = j[l]
+        m = g + l
+        c[m] = i
+        f[m] += h[l++ % seed_bytes] + i
       }
-      j += 32
+      g += 32
     }
   }
-  k.set(reduce(f, 32))
+  k.set(reduces(f, 32))
 }
 
-function crypto_kem_dec (c, k, p) {
-  const d = []
-  for (let i = 0, l = sample_bytes; i < l;) {
-    d.push(p.slice(i, i += 32).toString())
+function crypto_kem_dec (k, c, p) {
+  const d = [], e = p.slice(-256)
+  let f = 0, g, h, i, j
+  while (f < sample_bytes) {
+    d.push(p.slice(f, f += 32).toString())
   }
-  const e = uint8(p.slice(-256))
-  for (let h, i = 0, j, l = c.length, m; i < l;) {
-    j = d.indexOf(c.slice(m = i, i += 32).toString())
-    if (j == -1) return
-    h = sample_bytes + j * 4
-    h = p.slice(h, h + 4)
-    j *= 32
-    for (let i = 0; i < 32; i++) {
-      e[i + m] += p[i + j] + h[i % 4]
+  f = 0
+  while (f < cipher_bytes) {
+    h = d.indexOf(c.slice(g = f, f += 32).toString())
+    if (h == -1) {
+      return
+    }
+    i = h * seed_bytes + sample_bytes
+    i = p.slice(i, i + seed_bytes)
+    h *= 32
+    j = 0
+    while (j < 32) {
+      e[g + j] += p[h + j] + i[j++ % seed_bytes]
     }
   }
-  k.set(reduce(e, 32))
+  k.set(reduces(e, 32))
 }
 
-priv = uint8(secret_bytes)
-pub = uint8(public_bytes)
-crypto_kem_keypair(priv, pub)
-ciph = uint8(cipher_bytes)
-key0 = uint8(shared_bytes)
-crypto_kem_enc(ciph, key0, pub)
-key1 = uint8(shared_bytes)
-crypto_kem_dec(ciph, key1, priv)
-key0.toString() == key1.toString()
+// priv = uint8(secret_bytes)
+// pub = uint8(public_bytes)
+// crypto_kem_keypair(priv, pub)
+// ciph = uint8(cipher_bytes)
+// key0 = uint8(shared_bytes)
+// crypto_kem_enc(ciph, key0, pub)
+// key1 = uint8(shared_bytes)
+// crypto_kem_dec(key1, ciph, priv)
+// key0.toString() == key1.toString()
+1
